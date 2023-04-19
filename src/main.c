@@ -15,7 +15,7 @@ int main(void) {
      * linenoise config. Add all registered command in to linenoise completion
      * and hints. Also, load command history and set history length.
      */
-    linenoiseSetCompletionCallback(completion);
+    // linenoiseSetCompletionCallback(completion);
     // linenoiseSetHintsCallback(hints);
     linenoiseHistoryLoad(".console.history");
     linenoiseHistorySetMaxLen(CONSOLE_HISTORY_LEN);
