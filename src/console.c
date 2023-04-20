@@ -132,10 +132,16 @@ int add_builtin_command(char *cmd_name, char *param, cmd_callback operation) {
 }
 
 cmd_element *check_cmd(char *cmd_name) {
+    if (cmd_name == NULL) return NULL;
     for (cmd_element *ptr = cmd_list; ptr; ptr = ptr->next) {
         if (strcmp(cmd_name, ptr->name) == 0) return ptr;
     }
     return NULL;
+}
+
+int exec_all_waiting_cmd(){
+    /* TODO: */
+    return 0;
 }
 
 /*
@@ -157,7 +163,11 @@ char *cmdtok(char *s, char *special_sign) {
         else
             break;
     }
-    last = s;
+
+    if (*s == 0) {
+        last = NULL;
+        return NULL;
+    }
 
     // check if *s is special_sign and eliminate the consecutive special_sign.
     for (char *spec = special_sign; (c = *spec++) != 0;) {
@@ -231,10 +241,11 @@ int console_start(fd_t fd) {
         }
 
         show_waiting_cmd();
-
         /* execute command in waiting queue */
-
         free(line);
+        if (exec_all_waiting_cmd() == -1) {
+            return -1;
+        }
     }
     return 1;
 }
@@ -288,9 +299,8 @@ int commands_init(char *path) {
     free(p);
 
     /* register build-in function as command */
-    if (add_builtin_command("|", "hello no a good day", do_pipe) == -1)
-        return -1;
-    if (add_builtin_command("quit", NULL, do_quit)) return -1;
+    if (add_builtin_command("|", NULL, do_pipe) == -1) return -1;
+    if (add_builtin_command("quit", "now:2min:3min", do_quit)) return -1;
     return 1;
 }
 
@@ -312,9 +322,8 @@ void showall_cmd() {
     return;
 }
 
-
-void show_waiting_cmd(){
-    for (waiting_cmd *from = waiting_queue_Rear; from; from = from->next){
+void show_waiting_cmd() {
+    for (waiting_cmd *from = waiting_queue_Rear; from; from = from->next) {
         printf("%s->", from->cmd_addr->name);
     }
     printf("\n");
