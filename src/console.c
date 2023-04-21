@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <wait.h>
 
 #include "linenoise.h"
 #include "utils.h"
@@ -19,7 +20,7 @@
 #define LINENOISE_MAX_LINE 4096
 #endif /* LINENOISE_MAX_LINE */
 
-typedef int (*cmd_callback)(struct __cmd_element, ...);
+typedef int (*cmd_callback)(struct __cmd_element, char *params, ...);
 
 typedef struct __params {
     char value[256];
@@ -34,9 +35,14 @@ typedef struct __cmd_element {
     struct __cmd_element *next;
 } cmd_element;
 
+typedef struct __pfd_element {
+    int read, write;
+    struct __pfd_element *next, *prev;
+} pfd_element;
+
 typedef struct __waiting_cmd {
-    int fd[2];
     char *param;
+    int *read, *write;
     struct __cmd_element *cmd_addr;
     struct __waiting_cmd *next;
 } waiting_cmd;
@@ -44,17 +50,47 @@ typedef struct __waiting_cmd {
 static cmd_element *cmd_list = NULL;
 static waiting_cmd *waiting_queue_Head = NULL;
 static waiting_cmd *waiting_queue_Rear = NULL;
+static pfd_element *pfd_list = NULL;
+// store all opened pfd in circular linked-list.
 
-int do_external_binary(cmd_element bin_cmd, ...) {
-    /* TODO: */
-    return 1;
+char **parse_params(char *params) {
+    /* TODO: parse parameter in to 2d-array */
+    char **params_list = calloc(20, sizeof(char *));
+
+    // printf("%s\n", params);
+    char *split = strtok(params, " ");
+    for (int c = 1; split; split = strtok(NULL, " "), c++) {
+        params_list[c] = split;
+    }
+    return params_list;
 }
 
-int do_pipe(cmd_element pipe, ...) {
-    /* TODO: */
-    return 1;
+int do_external_binary(cmd_element bin_cmd, char *params, ...) {
+    char **params_list = parse_params(params);
+    params_list[0] = bin_cmd.name;
+    
+    // printf("FULLNAME: %s\n", bin_cmd.fullname);
+    // printf("PARAMS: \n");
+    for (int i = 0; params_list[i]; i++){
+        printf("\t%s\n", params_list[i]);
+    }
+    execv(bin_cmd.fullname, params_list);
+    return -1;
 }
-int do_quit(cmd_element pipe, ...) { return -1; }
+
+int do_pipe(cmd_element pipe, char *params, ...) {
+    FILE *read, *write;
+    if ((read = fdopen(STDIN_FILENO, "r")) == NULL) return -1;
+    if ((write = fdopen(STDOUT_FILENO, "w")) == NULL) return -1;
+
+    int c;
+    while ((c = fgetc(read)) != EOF) {
+        fputc(c, write);
+    }
+
+    return 0;
+}
+int do_quit(cmd_element pipe, char *params, ...) { return -1; }
 
 int add_command(cmd_element cmd) {
     cmd_element *new_cmd = malloc(sizeof(cmd_element));
@@ -139,8 +175,107 @@ cmd_element *check_cmd(char *cmd_name) {
     return NULL;
 }
 
-int exec_all_waiting_cmd(){
+/*
+ * add_pfd() help mantain opened file descripter in circular linked-list.
+ */
+pfd_element *add_pfd(int fd[2]) {
+    if (pfd_list == NULL) {
+        pfd_list = malloc(sizeof(pfd_element));
+        pfd_list->next = pfd_list->prev = pfd_list;
+        pfd_list->read = fd[0];
+        pfd_list->write = fd[1];
+        return pfd_list;
+    }
+
+    pfd_element *new_pfd = malloc(sizeof(pfd_element));
+    pfd_list->next->prev = new_pfd;
+    new_pfd->next = pfd_list->next;
+
+    new_pfd->prev = pfd_list;
+    pfd_list->next = new_pfd;
+    pfd_list = new_pfd;
+
+    return pfd_list;
+}
+
+int close_pfd(pfd_element *pfd) {
+    if (pfd_list == pfd){
+        pfd_list = pfd->prev;
+    }
+    if (pfd->prev == pfd){
+        free(pfd);
+        pfd_list = NULL;
+        return 0;
+    }
+    pfd->prev->next = pfd->next;
+    pfd->next->prev = pfd->prev;
+    free(pfd);
+    return 0;
+}
+
+/*
+ * close all pfd except 0, 1, 2
+ */
+int close_all_pfd() {
     /* TODO: */
+    for (pfd_element *cur = pfd_list; cur; cur = pfd_list) {
+        close_pfd(cur);
+    }
+    return 0;
+}
+
+int free_all_waiting_cmd() { /* TODO: */
+    for (waiting_cmd *cur = waiting_queue_Rear; cur; cur = waiting_queue_Rear) {
+        waiting_queue_Rear = waiting_queue_Rear->next;
+        free(cur->param);
+        free(cur);
+    }
+    waiting_queue_Head = NULL;
+    return 0;
+}
+
+int exec_all_waiting_cmd() {
+    for (waiting_cmd *cur_cmd = waiting_queue_Rear; cur_cmd;
+         cur_cmd = cur_cmd->next) {
+        /* pipe in no need for last command. */
+        if (cur_cmd->next) {
+            int fd[2];
+            if (pipe(fd) == -1) {
+                perror("pipe");
+                exit(EXIT_FAILURE);
+            }
+
+            pfd_element *cur_pfd = add_pfd(fd);
+            cur_cmd->write = &cur_pfd->write;
+            if (cur_cmd->next) {
+                cur_cmd->next->read = &cur_pfd->read;
+            }
+        }
+
+        pid_t child;
+        if ((child = fork()) == -1) {
+            perror("fork");
+            exit(EXIT_FAILURE);
+        }
+
+        if (child == 0) {
+            /* child process */
+            if (cur_cmd->read) dup2(*cur_cmd->read, STDIN_FILENO);
+            if (cur_cmd->write) dup2(*cur_cmd->write, STDOUT_FILENO);
+            close_all_pfd();
+
+            return cur_cmd->cmd_addr->operation(*cur_cmd->cmd_addr,
+                                                cur_cmd->param);
+        }
+    }
+
+    while (wait(NULL) != -1) {
+    }
+
+    close_all_pfd();
+    free_all_waiting_cmd();
+
+    // showall_pfd();
     return 0;
 }
 
@@ -214,9 +349,10 @@ int console_start(fd_t fd) {
     char *line;
     while (1) {
         line = linenoise("shell> ");
+        if (line == NULL) break;
+
         linenoiseHistoryAdd(line);
         linenoiseHistorySave(".console.history");
-        if (line == NULL) break;
 
         /* put command into waiting queue */
         char *split = cmdtok(line, "|");
@@ -231,16 +367,20 @@ int console_start(fd_t fd) {
             }
 
             waiting_cmd wait_cmd;
-            wait_cmd.fd[0] = wait_cmd.fd[1] = 0;
+            wait_cmd.read = wait_cmd.write = NULL;
             wait_cmd.cmd_addr = cmd_addr;
-            wait_cmd.param = param;
+            if (param) {
+                wait_cmd.param = strdup(param);
+            } else {
+                wait_cmd.param = NULL;
+            }
             wait_cmd.next = NULL;
             if (append_queue(wait_cmd) == -1) return -1;
 
             free(split);
         }
 
-        show_waiting_cmd();
+        showall_waiting_cmd();
         /* execute command in waiting queue */
         free(line);
         if (exec_all_waiting_cmd() == -1) {
@@ -322,10 +462,19 @@ void showall_cmd() {
     return;
 }
 
-void show_waiting_cmd() {
+void showall_waiting_cmd() {
     for (waiting_cmd *from = waiting_queue_Rear; from; from = from->next) {
         printf("%s->", from->cmd_addr->name);
     }
     printf("\n");
+    return;
+}
+
+void showall_pfd() {
+    for (pfd_element *from = pfd_list->next; from != pfd_list;
+         from = from->next) {
+        printf("%d, %d <--> ", from->read, from->write);
+    }
+    printf("%d, %d\n", pfd_list->read, pfd_list->write);
     return;
 }
