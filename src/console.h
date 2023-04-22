@@ -15,6 +15,8 @@ void showall_cmd();
 
 void showall_waiting_cmd();
 
+void showall_pfd();
+
 void completion(const char *buf, linenoiseCompletions *lc);
 // char *hints(const char *buf, int *color, int *bold);
 

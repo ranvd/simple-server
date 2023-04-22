@@ -54,10 +54,18 @@ static pfd_element *pfd_list = NULL;
 // store all opened pfd in circular linked-list.
 
 char **parse_params(char *params) {
-    /* TODO: parse parameter in to 2d-array */
+    /* parse parameter in to 2d-array */
     char **params_list = calloc(20, sizeof(char *));
 
-    // printf("%s\n", params);
+    /*
+     * Because the first call to strtok() should not be NULL.
+     * According from the Apple opensource:
+     * https://opensource.apple.com/source/Libc/Libc-167/string.subproj/strtok.c.auto.html
+     * We can see that, if the first call of strtok() is NULL,
+     * The behavior may be Segmentation fault or some undefine behavior.
+     */
+    if (params == NULL) return params_list;
+    
     char *split = strtok(params, " ");
     for (int c = 1; split; split = strtok(NULL, " "), c++) {
         params_list[c] = split;
@@ -69,11 +77,9 @@ int do_external_binary(cmd_element bin_cmd, char *params, ...) {
     char **params_list = parse_params(params);
     params_list[0] = bin_cmd.name;
     
-    // printf("FULLNAME: %s\n", bin_cmd.fullname);
-    // printf("PARAMS: \n");
-    for (int i = 0; params_list[i]; i++){
-        printf("\t%s\n", params_list[i]);
-    }
+    // for (int i = 0; params_list[i]; i++){
+    //     printf("\t%s\n", params_list[i]);
+    // }
     execv(bin_cmd.fullname, params_list);
     return -1;
 }
@@ -267,6 +273,7 @@ int exec_all_waiting_cmd() {
             return cur_cmd->cmd_addr->operation(*cur_cmd->cmd_addr,
                                                 cur_cmd->param);
         }
+        // showall_pfd();
     }
 
     while (wait(NULL) != -1) {
