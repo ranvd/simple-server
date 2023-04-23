@@ -1,5 +1,5 @@
 
-FLAG = -g -MMD -Wall
+FLAG = -g -Og -MMD -Wall
 INC = linenoise/
 SRC = ./src
 

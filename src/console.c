@@ -65,7 +65,7 @@ char **parse_params(char *params) {
      * The behavior may be Segmentation fault or some undefine behavior.
      */
     if (params == NULL) return params_list;
-    
+
     char *split = strtok(params, " ");
     for (int c = 1; split; split = strtok(NULL, " "), c++) {
         params_list[c] = split;
@@ -76,10 +76,7 @@ char **parse_params(char *params) {
 int do_external_binary(cmd_element bin_cmd, char *params, ...) {
     char **params_list = parse_params(params);
     params_list[0] = bin_cmd.name;
-    
-    // for (int i = 0; params_list[i]; i++){
-    //     printf("\t%s\n", params_list[i]);
-    // }
+
     execv(bin_cmd.fullname, params_list);
     return -1;
 }
@@ -88,7 +85,6 @@ int do_pipe(cmd_element pipe, char *params, ...) {
     FILE *read, *write;
     if ((read = fdopen(STDIN_FILENO, "r")) == NULL) return -1;
     if ((write = fdopen(STDOUT_FILENO, "w")) == NULL) return -1;
-
     int c;
     while ((c = fgetc(read)) != EOF) {
         fputc(c, write);
@@ -194,6 +190,8 @@ pfd_element *add_pfd(int fd[2]) {
     }
 
     pfd_element *new_pfd = malloc(sizeof(pfd_element));
+    new_pfd->read = fd[0];
+    new_pfd->write = fd[1];
     pfd_list->next->prev = new_pfd;
     new_pfd->next = pfd_list->next;
 
@@ -205,14 +203,20 @@ pfd_element *add_pfd(int fd[2]) {
 }
 
 int close_pfd(pfd_element *pfd) {
-    if (pfd_list == pfd){
+    if (pfd == NULL) return 0;
+
+    close(pfd->read);
+    close(pfd->write);
+
+    if (pfd_list == pfd) {
         pfd_list = pfd->prev;
     }
-    if (pfd->prev == pfd){
+    if (pfd->prev == pfd) {
         free(pfd);
         pfd_list = NULL;
         return 0;
     }
+
     pfd->prev->next = pfd->next;
     pfd->next->prev = pfd->prev;
     free(pfd);
@@ -241,6 +245,8 @@ int free_all_waiting_cmd() { /* TODO: */
 }
 
 int exec_all_waiting_cmd() {
+    if (waiting_queue_Rear == NULL) return 0;
+
     for (waiting_cmd *cur_cmd = waiting_queue_Rear; cur_cmd;
          cur_cmd = cur_cmd->next) {
         /* pipe in no need for last command. */
@@ -270,16 +276,18 @@ int exec_all_waiting_cmd() {
             if (cur_cmd->write) dup2(*cur_cmd->write, STDOUT_FILENO);
             close_all_pfd();
 
-            return cur_cmd->cmd_addr->operation(*cur_cmd->cmd_addr,
-                                                cur_cmd->param);
+            int success = cur_cmd->cmd_addr->operation(*cur_cmd->cmd_addr,
+                                                       cur_cmd->param);
+            return success;
         }
         // showall_pfd();
     }
 
+    close_all_pfd();
+
     while (wait(NULL) != -1) {
     }
 
-    close_all_pfd();
     free_all_waiting_cmd();
 
     // showall_pfd();
@@ -387,7 +395,7 @@ int console_start(fd_t fd) {
             free(split);
         }
 
-        showall_waiting_cmd();
+        // showall_waiting_cmd();
         /* execute command in waiting queue */
         free(line);
         if (exec_all_waiting_cmd() == -1) {
