@@ -1,6 +1,6 @@
 
 FLAG = -g -Og -MMD -Wall
-INC = linenoise/
+INC_LINENOISE = linenoise/
 SRC = ./src
 
 FILE = $(wildcard $(SRC)/*.c)
@@ -11,11 +11,11 @@ DEP_FILE = $(patsubst %.c, %.d, $(FILE))
 
 .DEFAULT_GOAL: main
 main: $(OBJ_FILE)
-	$(CC) $(FLAG) -I$(INC) -o $@ $^
+	$(CC) $(FLAG) -I$(INC_LINENOISE) -o $@ $^
 
 -include $(DEP_FILE)
 %.o : %.c
-	$(CC) $(FLAG) -I$(INC) -c -o $@ $<
+	$(CC) $(FLAG) -I$(INC_LINENOISE) -c -o $@ $<
 
 .PHONY: clean
 clean:

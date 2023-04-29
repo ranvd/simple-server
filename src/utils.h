@@ -9,4 +9,5 @@ static inline int is_executable(char *fullpath) {
             (sb.st_mode & S_IXUSR));
 }
 
+char **parse_params(char *params, int at);
 #endif /* SIMPLE_SERVER_UTILs_H */

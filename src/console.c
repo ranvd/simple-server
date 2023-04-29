@@ -1,6 +1,8 @@
 #include "console.h"
 
 #include <dirent.h>
+#include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,33 +14,10 @@
 #include "linenoise.h"
 #include "utils.h"
 
-#ifndef LINENOISE_MAX_LINE
-/*
- * LINENOISE_MAX_LINE should be defined in linenoise.c,
- * if not, then define it.
- */
-#define LINENOISE_MAX_LINE 4096
-#endif /* LINENOISE_MAX_LINE */
-
-typedef int (*cmd_callback)(struct __cmd_element, char *params, ...);
-
 typedef struct __params {
     char value[256];
     struct __params *next;
 } params;
-
-typedef struct __cmd_element {
-    char name[LINENOISE_MAX_LINE];
-    char fullname[LINENOISE_MAX_LINE];
-    cmd_callback operation;
-    struct __params *params;
-    struct __cmd_element *next;
-} cmd_element;
-
-typedef struct __pfd_element {
-    int read, write;
-    struct __pfd_element *next, *prev;
-} pfd_element;
 
 typedef struct __waiting_cmd {
     char *param;
@@ -47,34 +26,18 @@ typedef struct __waiting_cmd {
     struct __waiting_cmd *next;
 } waiting_cmd;
 
+/*
+ * cmd_list is mantain in singly linked-list.
+ * waiting_cmd is a queue with singly linked-list.
+ * pfd_list is mantain in circular linked-list.
+ */
 static cmd_element *cmd_list = NULL;
 static waiting_cmd *waiting_queue_Head = NULL;
 static waiting_cmd *waiting_queue_Rear = NULL;
 static pfd_element *pfd_list = NULL;
-// store all opened pfd in circular linked-list.
-
-char **parse_params(char *params) {
-    /* parse parameter in to 2d-array */
-    char **params_list = calloc(20, sizeof(char *));
-
-    /*
-     * Because the first call to strtok() should not be NULL.
-     * According from the Apple opensource:
-     * https://opensource.apple.com/source/Libc/Libc-167/string.subproj/strtok.c.auto.html
-     * We can see that, if the first call of strtok() is NULL,
-     * The behavior may be Segmentation fault or some undefine behavior.
-     */
-    if (params == NULL) return params_list;
-
-    char *split = strtok(params, " ");
-    for (int c = 1; split; split = strtok(NULL, " "), c++) {
-        params_list[c] = split;
-    }
-    return params_list;
-}
 
 int do_external_binary(cmd_element bin_cmd, char *params, ...) {
-    char **params_list = parse_params(params);
+    char **params_list = parse_params(params, 1);
     params_list[0] = bin_cmd.name;
 
     execv(bin_cmd.fullname, params_list);
@@ -92,8 +55,21 @@ int do_pipe(cmd_element pipe, char *params, ...) {
 
     return 0;
 }
-int do_quit(cmd_element pipe, char *params, ...) { return -1; }
 
+int do_quit(cmd_element pipe, char *params, ...) {
+    va_list ap;
+    va_start(ap, params);
+    pid_t parent = va_arg(ap, pid_t);
+    va_end(ap);
+
+    kill(parent, SIGINT);
+    exit(EXIT_SUCCESS);
+    return -1;
+}
+
+/*
+ * This will append command(cmd) into cmd_list.
+ */
 int add_command(cmd_element cmd) {
     cmd_element *new_cmd = malloc(sizeof(cmd_element));
     if (new_cmd == NULL) return -1;
@@ -128,26 +104,8 @@ int add_param(cmd_element *cmd, char *param) {
     return 0;
 }
 
-int append_queue(waiting_cmd cmd) {
-    waiting_cmd *new_cmd = malloc(sizeof(waiting_cmd));
-    if (new_cmd == NULL) return -1;
-
-    memcpy(new_cmd, &cmd, sizeof(waiting_cmd));
-    new_cmd->next = NULL;
-
-    if (waiting_queue_Head == NULL) {
-        waiting_queue_Head = new_cmd;
-        waiting_queue_Rear = new_cmd;
-        return 0;
-    }
-
-    waiting_queue_Head->next = new_cmd;
-    waiting_queue_Head = waiting_queue_Head->next;
-    return 0;
-}
-
 /*
- * param: seperate by ":" or " "
+ * param: each parameter should seperate by ":" or " ".
  */
 int add_builtin_command(char *cmd_name, char *param, cmd_callback operation) {
     cmd_element cmd;
@@ -167,6 +125,24 @@ int add_builtin_command(char *cmd_name, char *param, cmd_callback operation) {
         free(p);
     }
     return add_command(cmd);
+}
+
+int append_queue(waiting_cmd cmd) {
+    waiting_cmd *new_cmd = malloc(sizeof(waiting_cmd));
+    if (new_cmd == NULL) return -1;
+
+    memcpy(new_cmd, &cmd, sizeof(waiting_cmd));
+    new_cmd->next = NULL;
+
+    if (waiting_queue_Head == NULL) {
+        waiting_queue_Head = new_cmd;
+        waiting_queue_Rear = new_cmd;
+        return 0;
+    }
+
+    waiting_queue_Head->next = new_cmd;
+    waiting_queue_Head = waiting_queue_Head->next;
+    return 0;
 }
 
 cmd_element *check_cmd(char *cmd_name) {
@@ -234,7 +210,7 @@ int close_all_pfd() {
     return 0;
 }
 
-int free_all_waiting_cmd() { /* TODO: */
+int free_all_waiting_cmd() {
     for (waiting_cmd *cur = waiting_queue_Rear; cur; cur = waiting_queue_Rear) {
         waiting_queue_Rear = waiting_queue_Rear->next;
         free(cur->param);
@@ -264,7 +240,7 @@ int exec_all_waiting_cmd() {
             }
         }
 
-        pid_t child;
+        pid_t child, parent = getpid();
         if ((child = fork()) == -1) {
             perror("fork");
             exit(EXIT_FAILURE);
@@ -277,18 +253,16 @@ int exec_all_waiting_cmd() {
             close_all_pfd();
 
             int success = cur_cmd->cmd_addr->operation(*cur_cmd->cmd_addr,
-                                                       cur_cmd->param);
-            return success;
+                                                       cur_cmd->param, parent);
+            exit(!(!success));
         }
         // showall_pfd();
     }
 
     close_all_pfd();
-
-    while (wait(NULL) != -1) {
-    }
-
     free_all_waiting_cmd();
+    while (wait(NULL) != -1)
+        ;
 
     // showall_pfd();
     return 0;
@@ -360,7 +334,11 @@ char *cmdtok(char *s, char *special_sign) {
     return cmd;
 }
 
-int console_start(fd_t fd) {
+int console_start(fd_t fd_in, fd_t fd_out, fd_t fd_err) {
+    if (fd_in > 2) dup2(fd_in, STDIN_FILENO);
+    if (fd_out > 2) dup2(fd_out, STDOUT_FILENO);
+    if (fd_err > 2) dup2(fd_err, STDERR_FILENO);
+
     char *line;
     while (1) {
         line = linenoise("shell> ");
@@ -405,7 +383,7 @@ int console_start(fd_t fd) {
     return 1;
 }
 
-int console_close(fd_t fd) {
+int console_close(fd_t fd_in, fd_t fd_out, fd_t fd_err) {
     /* TODO: */
     printf("Closing: free all allocated resource\n");
     while (cmd_list) {
@@ -447,15 +425,17 @@ int commands_init(char *path) {
                 cmd.operation = do_external_binary;
                 cmd.params = NULL;
 
-                if (add_command(cmd)) return -1;
+                if (add_command(cmd) == -1) return -1;
             }
         }
+        closedir(dir);
     }
     free(p);
 
     /* register build-in function as command */
     if (add_builtin_command("|", NULL, do_pipe) == -1) return -1;
     if (add_builtin_command("quit", "now:2min:3min", do_quit)) return -1;
+    if (add_builtin_command("server", "start:tell", do_server)) return -1;
     return 1;
 }
 

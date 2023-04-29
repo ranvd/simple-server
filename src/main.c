@@ -22,8 +22,8 @@ int main(void) {
 
     showall_cmd();
     int success = 1;
-    success = success && console_start(STDIN_FILENO);
-    success = success && console_close(STDIN_FILENO);
+    success = success && console_start(STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO);
+    success = success && console_close(STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO);
 
     return !success;
 }
