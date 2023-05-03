@@ -12,6 +12,11 @@
 #ifndef SIMPLE_SERVER_CONSOLE_H
 #define SIMPLE_SERVER_CONSOLE_H
 
+#define SSC_PIPE 1
+#define SSC_SOCK_SERV 2
+#define SSC_SOCK_CLIENT 4
+
+
 typedef long int fd_t;
 struct __cmd_element;
 struct __pfd_element;
@@ -28,8 +33,17 @@ typedef struct __cmd_element {
 
 typedef struct __pfd_element {
     int read, write;
+    int fdtype;
     struct __pfd_element *next, *prev;
 } pfd_element;
+
+typedef struct __waiting_cmd {
+    char *param;
+    int *read, *write;
+    struct __cmd_element *cmd_addr;
+    void *additional_data;
+    struct __waiting_cmd *next;
+} waiting_cmd;
 
 
 int console_start(fd_t, fd_t, fd_t);
@@ -40,15 +54,19 @@ char *cmdtok(char *s, char *special_sign);
 
 int add_command(struct __cmd_element cmd);
 int add_builtin_command(char *cmd_name, char *param, cmd_callback operation);
-struct __pfd_element *add_pfd(int fd[2]);
+struct __pfd_element *add_pfd(int fd[2], int fdtype);
+
+int append_queue(waiting_cmd cmd);
 
 cmd_element *check_cmd(char *cmd_name);
 
 int close_pfd(struct __pfd_element *pfd);
-int close_all_pfd();
+int close_all_pfd(int fdtype);
 
 int free_all_waiting_cmd();
+int exec_all_waiting_cmd();
 
+waiting_cmd get_n_waiting_cmd(int n);
 
 /* Debug */
 void showall_cmd();

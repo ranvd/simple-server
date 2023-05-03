@@ -19,13 +19,6 @@ typedef struct __params {
     struct __params *next;
 } params;
 
-typedef struct __waiting_cmd {
-    char *param;
-    int *read, *write;
-    struct __cmd_element *cmd_addr;
-    struct __waiting_cmd *next;
-} waiting_cmd;
-
 /*
  * cmd_list is mantain in singly linked-list.
  * waiting_cmd is a queue with singly linked-list.
@@ -35,6 +28,16 @@ static cmd_element *cmd_list = NULL;
 static waiting_cmd *waiting_queue_Head = NULL;
 static waiting_cmd *waiting_queue_Rear = NULL;
 static pfd_element *pfd_list = NULL;
+
+waiting_cmd get_n_waiting_cmd(int n) {
+    
+    waiting_cmd *cmd = waiting_queue_Rear;
+    for(int i = 0; cmd && i < n; i++){
+        cmd = cmd->next;
+    }
+    if (cmd) return *cmd;
+    return *waiting_queue_Head;
+}
 
 int do_external_binary(cmd_element bin_cmd, char *params, ...) {
     char **params_list = parse_params(params, 1);
@@ -56,7 +59,7 @@ int do_pipe(cmd_element pipe, char *params, ...) {
     return 0;
 }
 
-int do_quit(cmd_element pipe, char *params, ...) {
+int do_quit(cmd_element quit, char *params, ...) {
     va_list ap;
     va_start(ap, params);
     pid_t parent = va_arg(ap, pid_t);
@@ -156,18 +159,20 @@ cmd_element *check_cmd(char *cmd_name) {
 /*
  * add_pfd() help mantain opened file descripter in circular linked-list.
  */
-pfd_element *add_pfd(int fd[2]) {
+pfd_element *add_pfd(int fd[2], int fdtype) {
     if (pfd_list == NULL) {
         pfd_list = malloc(sizeof(pfd_element));
         pfd_list->next = pfd_list->prev = pfd_list;
         pfd_list->read = fd[0];
         pfd_list->write = fd[1];
+        pfd_list->fdtype = fdtype;
         return pfd_list;
     }
 
     pfd_element *new_pfd = malloc(sizeof(pfd_element));
     new_pfd->read = fd[0];
     new_pfd->write = fd[1];
+    new_pfd->fdtype = fdtype;
     pfd_list->next->prev = new_pfd;
     new_pfd->next = pfd_list->next;
 
@@ -202,10 +207,22 @@ int close_pfd(pfd_element *pfd) {
 /*
  * close all pfd except 0, 1, 2
  */
-int close_all_pfd() {
+int close_all_pfd(int fdtype) {
     /* TODO: */
-    for (pfd_element *cur = pfd_list; cur; cur = pfd_list) {
-        close_pfd(cur);
+    if (pfd_list == NULL) return 0;
+
+    pfd_element *cur = pfd_list;
+    do {
+        if (cur->fdtype == fdtype) {
+            cur = cur->next;
+            close_pfd(cur->prev);
+        } else {
+            cur = cur->next;
+        }
+    } while (pfd_list && pfd_list != cur);
+
+    if (pfd_list && pfd_list->fdtype == fdtype) {
+        close_pfd(pfd_list);
     }
     return 0;
 }
@@ -233,14 +250,14 @@ int exec_all_waiting_cmd() {
                 exit(EXIT_FAILURE);
             }
 
-            pfd_element *cur_pfd = add_pfd(fd);
+            pfd_element *cur_pfd = add_pfd(fd, SSC_PIPE);
             cur_cmd->write = &cur_pfd->write;
             if (cur_cmd->next) {
                 cur_cmd->next->read = &cur_pfd->read;
             }
         }
 
-        pid_t child, parent = getpid();
+        pid_t child;
         if ((child = fork()) == -1) {
             perror("fork");
             exit(EXIT_FAILURE);
@@ -248,21 +265,22 @@ int exec_all_waiting_cmd() {
 
         if (child == 0) {
             /* child process */
-            if (cur_cmd->read) dup2(*cur_cmd->read, STDIN_FILENO);
-            if (cur_cmd->write) dup2(*cur_cmd->write, STDOUT_FILENO);
-            close_all_pfd();
-
-            int success = cur_cmd->cmd_addr->operation(*cur_cmd->cmd_addr,
-                                                       cur_cmd->param, parent);
+            if (cur_cmd->read) {
+                dup2(*cur_cmd->read, STDIN_FILENO);
+            }
+            if (cur_cmd->write) {
+                dup2(*cur_cmd->write, STDOUT_FILENO);
+            }
+            close_all_pfd(SSC_PIPE);
+            int success = cur_cmd->cmd_addr->operation(
+                *cur_cmd->cmd_addr, cur_cmd->param, cur_cmd->additional_data);
             exit(!(!success));
         }
         // showall_pfd();
     }
 
-    close_all_pfd();
+    close_all_pfd(SSC_PIPE);
     free_all_waiting_cmd();
-    while (wait(NULL) != -1)
-        ;
 
     // showall_pfd();
     return 0;
@@ -362,14 +380,19 @@ int console_start(fd_t fd_in, fd_t fd_out, fd_t fd_err) {
             waiting_cmd wait_cmd;
             wait_cmd.read = wait_cmd.write = NULL;
             wait_cmd.cmd_addr = cmd_addr;
+            if (strcmp(cmd_addr->name, "quit") == 0) {
+                wait_cmd.additional_data = (void *)getpid();
+            } else {
+                wait_cmd.additional_data = (void *)0;
+            }
             if (param) {
                 wait_cmd.param = strdup(param);
             } else {
                 wait_cmd.param = NULL;
             }
             wait_cmd.next = NULL;
-            if (append_queue(wait_cmd) == -1) return -1;
 
+            if (append_queue(wait_cmd) == -1) return -1;
             free(split);
         }
 
@@ -379,6 +402,8 @@ int console_start(fd_t fd_in, fd_t fd_out, fd_t fd_err) {
         if (exec_all_waiting_cmd() == -1) {
             return -1;
         }
+        while (wait(NULL) != -1)
+            ;
     }
     return 1;
 }
@@ -466,10 +491,34 @@ void showall_waiting_cmd() {
 }
 
 void showall_pfd() {
+    if (pfd_list == NULL) {
+        printf("NO pfd\n");
+        return;
+    }
     for (pfd_element *from = pfd_list->next; from != pfd_list;
          from = from->next) {
-        printf("%d, %d <--> ", from->read, from->write);
+        if (from->prev) {
+            printf("(%d,%d)", from->prev->read, from->prev->write);
+        } else {
+            printf("(n,n)");
+        }
+        printf(" %d,%d ", from->read, from->write);
+        if (from->next) {
+            printf("(%d,%d) <--> ", from->next->read, from->next->write);
+        } else {
+            printf("(n,n) <--> ");
+        }
     }
-    printf("%d, %d\n", pfd_list->read, pfd_list->write);
+    if (pfd_list->prev) {
+        printf("(%d,%d)", pfd_list->prev->read, pfd_list->prev->write);
+    } else {
+        printf("(n,n)");
+    }
+    printf(" <%d,%d> ", pfd_list->read, pfd_list->write);
+    if (pfd_list->next) {
+        printf("(%d,%d) <--> \n", pfd_list->next->read, pfd_list->next->write);
+    } else {
+        printf("(n,n) <--> \n");
+    }
     return;
 }
