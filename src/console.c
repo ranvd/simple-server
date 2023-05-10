@@ -29,14 +29,13 @@ static waiting_cmd *waiting_queue_Head = NULL;
 static waiting_cmd *waiting_queue_Rear = NULL;
 static pfd_element *pfd_list = NULL;
 
-waiting_cmd get_n_waiting_cmd(int n) {
-    
+waiting_cmd *get_n_waiting_cmd(int n) {
     waiting_cmd *cmd = waiting_queue_Rear;
-    for(int i = 0; cmd && i < n; i++){
+    for (int i = 0; cmd && i < n; i++) {
         cmd = cmd->next;
     }
-    if (cmd) return *cmd;
-    return *waiting_queue_Head;
+    if (cmd) return cmd;
+    return NULL;
 }
 
 int do_external_binary(cmd_element bin_cmd, char *params, ...) {
@@ -156,6 +155,18 @@ cmd_element *check_cmd(char *cmd_name) {
     return NULL;
 }
 
+struct __pfd_element *get_pfd(int flag) {
+    pfd_element *cur = pfd_list;
+    do {
+        if ((cur->fdtype & flag) && (cur->fdtype & ~flag)) {
+            return cur;
+        }
+        cur = cur->next;
+    } while (cur != pfd_list);
+
+    return NULL;
+}
+
 /*
  * add_pfd() help mantain opened file descripter in circular linked-list.
  */
@@ -213,7 +224,7 @@ int close_all_pfd(int fdtype) {
 
     pfd_element *cur = pfd_list;
     do {
-        if (cur->fdtype == fdtype) {
+        if (cur->fdtype & fdtype) {
             cur = cur->next;
             close_pfd(cur->prev);
         } else {
@@ -221,7 +232,7 @@ int close_all_pfd(int fdtype) {
         }
     } while (pfd_list && pfd_list != cur);
 
-    if (pfd_list && pfd_list->fdtype == fdtype) {
+    if (pfd_list && (pfd_list->fdtype & fdtype)) {
         close_pfd(pfd_list);
     }
     return 0;
@@ -473,12 +484,14 @@ void completion(const char *buf, linenoiseCompletions *lc) {
 
 // DEBUG
 void showall_cmd() {
+    printf("-------- Accepted command --------\n");
     for (cmd_element *head = cmd_list; head; head = head->next) {
-        printf("%s\n", head->name);
+        printf("| %-32s|\n", head->name);
         for (params *p = head->params; p; p = p->next) {
-            printf("  < %s >\n", p->value);
+            printf("| - %-30s|\n", p->value);
         }
     }
+    printf("----------------------------------\n");
     return;
 }
 

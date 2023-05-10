@@ -253,6 +253,7 @@ int user_input_handler(chatroom_user *user, char *input) {
         if ((cmd_addr = check_cmd(name)) == NULL) {
             dprintf(user->fd->write, "command not found: \"%s\" doesn't exit\n",
                     name);
+            free(split);
             break;
         }
 
@@ -270,10 +271,10 @@ int user_input_handler(chatroom_user *user, char *input) {
      * God, please forgive me. Here is the most ugly code in this program.
      * START of UGLY CODE
      */
-    waiting_cmd first_cmd = get_n_waiting_cmd(0);
-    if (strcmp(first_cmd.cmd_addr->name, "name") == 0) {
-        do_name(*first_cmd.cmd_addr, first_cmd.param,
-                first_cmd.additional_data);
+    waiting_cmd *first_cmd = get_n_waiting_cmd(0);
+    if (first_cmd && strcmp(first_cmd->cmd_addr->name, "name") == 0) {
+        do_name(*first_cmd->cmd_addr, first_cmd->param,
+                first_cmd->additional_data);
         free_all_waiting_cmd();
         free(neat_input);
         free(dup_input);
@@ -311,6 +312,8 @@ int server_start() {
     int fd[2] = {socket_fd, socket_fd};
     add_pfd(fd, SSC_SOCK_SERV);
     printf("server info: %s %d\n", ip, port);
+
+    
 
     while (1) {
         socklen_t len = sizeof(struct sockaddr_in);
@@ -442,6 +445,20 @@ int do_name(struct __cmd_element name, char *params, ...) {
     return 0;
 }
 
+
+int do_listMail(struct __cmd_element who, char *params, ...);
+int do_sentMail(struct __cmd_element who, char *params, ...);
+int do_delMail(struct __cmd_element who, char *params, ...);
+
+int do_Groups(struct __cmd_element who, char *params, ...);
+int do_gyell(struct __cmd_element who, char *params, ...);
+int do_listGroup(struct __cmd_element who, char *params, ...);
+int do_createGroup(struct __cmd_element who, char *params, ...);
+int do_delGroup(struct __cmd_element who, char *params, ...);
+int do_addGroup(struct __cmd_element who, char *params, ...);
+int do_leaveGroup(struct __cmd_element who, char *params, ...);
+int do_kickUser(struct __cmd_element who, char *params, ...);
+
 void name_handler() {}
 
 int do_server(struct __cmd_element server, char *params, ...) {
@@ -455,11 +472,26 @@ int do_server(struct __cmd_element server, char *params, ...) {
     if (add_builtin_command("yell", NULL, do_yell) == -1) return -1;
     if (add_builtin_command("name", NULL, do_name) == -1) return -1;
 
+    // if (add_builtin_command("listMail", NULL, do_listMail) == -1) return -1;
+    // if (add_builtin_command("sentMail", NULL, do_sentMail) == -1) return -1;
+    // if (add_builtin_command("delMail", NULL, do_delMail) == -1) return -1;
+
+    // if (add_builtin_command("Groups", NULL, do_Groups) == -1) return -1;
+    // if (add_builtin_command("gyell", NULL, do_gyell) == -1) return -1;
+    // if (add_builtin_command("listGroup", NULL, do_listGroup) == -1) return -1;
+    // if (add_builtin_command("createGroup", NULL, do_createGroup) == -1) return -1;
+    // if (add_builtin_command("delGroup", NULL, do_delGroup) == -1) return -1;
+    // if (add_builtin_command("addGroup", NULL, do_addGroup) == -1) return -1;
+    // if (add_builtin_command("leaveGroup", NULL, do_leaveGroup) == -1) return -1;
+    // if (add_builtin_command("kickUser", NULL, do_kickUser) == -1) return -1;
+
     signal(SIGUSR1, name_handler);
 
     int success = 0;
     if (strcmp(params_list[1], "start") == 0) {
-        printf("server start\n");
+        printf("Server start O.<\n");
+        printf("Connecting to redis server :)\n");
+
         success = server_start();
         exit(!(!success));
     } else {

@@ -9,5 +9,12 @@ static inline int is_executable(char *fullpath) {
             (sb.st_mode & S_IXUSR));
 }
 
+static inline void exit_if_fail(int val, int fail, char *msg){
+    if (val == fail){
+        perror(msg);
+        exit(EXIT_FAILURE);
+    }
+}
+
 char **parse_params(char *params, int at);
 #endif /* SIMPLE_SERVER_UTILs_H */
