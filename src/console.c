@@ -29,15 +29,6 @@ static waiting_cmd *waiting_queue_Head = NULL;
 static waiting_cmd *waiting_queue_Rear = NULL;
 static pfd_element *pfd_list = NULL;
 
-waiting_cmd *get_n_waiting_cmd(int n) {
-    waiting_cmd *cmd = waiting_queue_Rear;
-    for (int i = 0; cmd && i < n; i++) {
-        cmd = cmd->next;
-    }
-    if (cmd) return cmd;
-    return NULL;
-}
-
 int do_external_binary(cmd_element bin_cmd, char *params, ...) {
     char **params_list = parse_params(params, 1);
     params_list[0] = bin_cmd.name;
@@ -127,6 +118,14 @@ int add_builtin_command(char *cmd_name, char *param, cmd_callback operation) {
         free(p);
     }
     return add_command(cmd);
+}
+waiting_cmd *get_n_waiting_cmd(int n) {
+    waiting_cmd *cmd = waiting_queue_Rear;
+    for (int i = 0; cmd && i < n; i++) {
+        cmd = cmd->next;
+    }
+    if (cmd) return cmd;
+    return NULL;
 }
 
 int append_queue(waiting_cmd cmd) {

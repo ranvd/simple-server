@@ -17,4 +17,9 @@ static inline void exit_if_fail(int val, int fail, char *msg){
 }
 
 char **parse_params(char *params, int at);
+
+#define RED_LIGHT "\033[0;31m"
+#define GREEN_LIGHT "\033[0;32m"
+#define RESET_LIGHT "\033[0m"
+
 #endif /* SIMPLE_SERVER_UTILs_H */
